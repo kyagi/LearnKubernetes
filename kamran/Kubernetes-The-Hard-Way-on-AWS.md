@@ -231,6 +231,7 @@ cat > kubernetes-csr.json <<EOF
     "worker1",
     "worker2",
     "10.0.0.1",
+    "10.32.0.1",
     "10.0.0.245",
     "10.0.0.246",
     "10.0.0.137",
@@ -392,6 +393,13 @@ etcd software is already pre-installed on Fedora Atomic, we just need to configu
 ```
 [fedora@ip-10-0-0-245 ~]$ sudo rpm -q etcd
 etcd-2.2.5-5.fc24.x86_64
+```
+```
+ubuntu@etcd1:~$ sudo apt-get install etcd
+ubuntu@etcd1:~$ dpkg -l | grep etcd
+ii  etcd                           3.2.17+dfsg-1                     all          Transitional package for etcd-client and etcd-server
+ii  etcd-client                    3.2.17+dfsg-1                     amd64        highly-available key value store -- client
+ii  etcd-server                    3.2.17+dfsg-1                     amd64        highly-available key value store -- daemon
 ```
 
 
@@ -571,6 +579,13 @@ Download and install latest Kubernetes (1.3):
 [fedora@ip-10-0-0-137 ~]$ sudo mv kube-apiserver kube-controller-manager kube-scheduler kubectl /usr/bin/
 ``` 
 
+```
+curl -s -O https://storage.googleapis.com/kubernetes-release/release/v1.11.8/bin/linux/amd64/kube-apiserver
+curl -s -O https://storage.googleapis.com/kubernetes-release/release/v1.11.8/bin/linux/amd64/kube-controller-manager
+curl -s -O https://storage.googleapis.com/kubernetes-release/release/v1.11.8/bin/linux/amd64/kube-scheduler
+curl -s -O https://storage.googleapis.com/kubernetes-release/release/v1.11.8/bin/linux/amd64/kubectl
+```
+
 **Note:** It needs to be ensured that the kubernetes binaries do not fail because of some non-existant pacakge. I hope these binaries are statically compiled and have everything built into them, which they need! (todo)
 
 
@@ -657,6 +672,43 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 ```
+
+--secure-port=443
+```
+[Unit]
+Description=Kubernetes API Server
+Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+
+[Service]
+ExecStart=/usr/bin/kube-apiserver \
+  --admission-control=NamespaceLifecycle,LimitRanger,SecurityContextDeny,ServiceAccount,ResourceQuota \
+  --advertise-address=INTERNAL_IP \
+  --allow-privileged=true \
+  --apiserver-count=2 \
+  --authorization-mode=ABAC \
+  --authorization-policy-file=/var/lib/kubernetes/authorization-policy.jsonl \
+  --bind-address=0.0.0.0 \
+  --enable-swagger-ui=true \
+  --etcd-cafile=/var/lib/kubernetes/ca.pem \
+  --secure-port=443 \
+  --insecure-bind-address=0.0.0.0 \
+  --kubelet-certificate-authority=/var/lib/kubernetes/ca.pem \
+  --etcd-servers=https://10.0.0.245:2379,https://10.0.0.246:2379 \
+  --service-account-key-file=/var/lib/kubernetes/kubernetes-key.pem \
+  --service-cluster-ip-range=10.32.0.0/24 \
+  --service-node-port-range=30000-32767 \
+  --tls-cert-file=/var/lib/kubernetes/kubernetes.pem \
+  --tls-private-key-file=/var/lib/kubernetes/kubernetes-key.pem \
+  --token-auth-file=/var/lib/kubernetes/token.csv \
+  --v=2
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+
 
 
 ```
@@ -871,6 +923,12 @@ tar xf docker-1.11.2.tgz
 sudo cp docker/docker* /usr/bin/
 ```
 
+```
+curl -O https://download.docker.com/linux/static/stable/x86_64/docker-18.06.3-ce.tgz
+tar xvf docker-18.06.3-ce.tgz
+sudo cp docker/docker* /usr/bin/
+```
+
 
 Create docker service file:
 
@@ -892,6 +950,22 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target" > /etc/systemd/system/docker.service'
 ```
+
+```
+[Unit]
+Description=Docker Application Container Engine
+Documentation=http://docs.docker.io
+
+[Service]
+ExecStart=/usr/bin/dockerd --iptables=false --ip-masq=false --host=unix:///var/run/docker.sock --log-level=error --storage-driver=overlay
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+
 
 **Note:** Do not use multi.user.wants in the service file's path above.
 
@@ -922,7 +996,6 @@ Server:
 [fedora@ip-10-0-0-182 ~]$ 
 ```
 
-
 ## Kubectl, kube-proxy and kubelet
 
 The Kubernetes kubelet no longer relies on docker networking for pods! The Kubelet can now use CNI - the Container Network Interface to manage machine level networking requirements.
@@ -934,11 +1007,59 @@ sudo tar xf cni-c864f0e1ea73719b8f4582402b0847064f9883b0.tar.gz -C /opt/cni
 ```
 
 
+Not necessary if using calico.yaml because calico.yaml will install these cni tools and plugins.
+```
+sudo mkdir -p /opt/cni/bin
+curl -OL https://github.com/containernetworking/cni/releases/download/v0.6.0/cni-amd64-v0.6.0.tgz
+tar ztvf cni-amd64-v0.6.0.tgz
+sudo tar xf cni-plugins-amd64-v0.7.4.tgz -C /opt/cni/bin
+```
+
 ```
 [fedora@ip-10-0-0-181 ~]$ ls /opt/cni/bin/
 bridge  cnitool  dhcp  flannel  host-local  ipvlan  loopback  macvlan  ptp  tuning
 [fedora@ip-10-0-0-181 ~]$ 
 ```
+
+```
+sudo mkdir /calico-secrets
+sudo cp /var/lib/kubernetes/ca.pem /calico-secrets/etcd-ca
+sudo cp /var/lib/kubernetes/kubernetes-key.pem /calico-secrets/etcd-key
+sudo cp /var/lib/kubernetes/kubernetes.pem /calico-secrets/etcd-cert
+```
+
+
+```
+ubuntu@worker1:~$ sudo cat /var/lib/kubernetes/kubeconfig
+# Kubeconfig file for Calico CNI plugin.
+apiVersion: v1
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: http://10.0.0.137:8080
+    insecure-skip-tls-verify: true
+users:
+- name: calico
+contexts:
+- name: calico-context
+  context:
+    cluster: local
+    user: calico
+current-context: calico-context
+```
+
+See https://docs.projectcalico.org/v3.6/getting-started/kubernetes/installation/config-options
+
+```
+Configuring etcd
+curl
+locate /calico-secrets/etcd-ca,cert,kety
+cat etcd-ca | base64 -w 0
+kubectl apply -f calico.yaml
+kubectl apply -f canal
+```
+
 
 I am not really sure, that how does kubernetes know about the existence of these binaries in /opt/cni/bin ? How does it setup CIDR network? [TODO]
 
@@ -955,11 +1076,20 @@ sudo mv kubectl kube-proxy kubelet /usr/bin/
 ``` 
 
 ```
+curl -s -O https://storage.googleapis.com/kubernetes-release/release/v1.11.8/bin/linux/amd64/kubectl
+curl -s -O https://storage.googleapis.com/kubernetes-release/release/v1.11.8/bin/linux/amd64/kube-proxy
+curl -s -O https://storage.googleapis.com/kubernetes-release/release/v1.11.8/bin/linux/amd64/kubelet
+
+chmod +x kubectl kube-proxy kubelet
+sudo mv kubectl kube-proxy kubelet /usr/bin/
+```
+
+```
 sudo mkdir -p /var/lib/kubelet/
 ```
 
 
-Mke sure to put in the internal IP address of the controller1 below for 'server'.
+Make sure to put in the internal IP address of the controller1 below for 'server'.
 ```
 sudo sh -c 'echo "apiVersion: v1
 kind: Config
@@ -1016,6 +1146,23 @@ RestartSec=5
 WantedBy=multi-user.target" > /etc/systemd/system/kubelet.service'
 ``` 
 
+no --api-servers option now.
+```
+[Unit]
+Description=Kubernetes Kubelet
+Documentation=https://github.com/GoogleCloudPlatform/kubernetes
+After=docker.service
+Requires=docker.service
+
+[Service]
+ExecStart=/usr/bin/kubelet   --allow-privileged=true   --kubeconfig=/var/lib/kubernetes/kubeconfig  --cloud-provider=   --cluster-dns=10.32.0.10   --cluster-domain=cluster.local   --container-runtime=docker   --docker=unix:///var/run/docker.sock   --network-plugin=cni  --cni-bin-dir=/opt/cni/bin   --cni-conf-dir=/opt/cni/net.d   --serialize-image-pulls=false   --tls-cert-file=/var/lib/kubernetes/kubernetes.pem   --tls-private-key-file=/var/lib/kubernetes/kubernetes-key.pem   --v=2
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ```
 sudo systemctl daemon-reload
@@ -1206,6 +1353,14 @@ Since kubectl on my local work computer is not setup yet. I will log on to the c
 service "kube-dns" created
 [fedora@ip-10-0-0-137 ~]$ 
 ```
+
+See https://github.com/kelseyhightower/kubernetes-the-hard-way/blob/master/docs/12-dns-addon.md
+```
+kubectl apply -f https://storage.googleapis.com/kubernetes-the-hard-way/coredns.yaml
+```
+
+
+
 
 ```
 [fedora@ip-10-0-0-137 ~]$ kubectl --namespace=kube-system get svc
