@@ -1007,11 +1007,13 @@ sudo tar xf cni-c864f0e1ea73719b8f4582402b0847064f9883b0.tar.gz -C /opt/cni
 ```
 
 
-Not necessary if using calico.yaml because calico.yaml will install these cni tools and plugins.
+Not necessary if using calico.yaml because calico.yaml will install these cni tools and plugins. Since v0.6.0, cnitools and plugins were separated as the release note said.
 ```
 sudo mkdir -p /opt/cni/bin
 curl -OL https://github.com/containernetworking/cni/releases/download/v0.6.0/cni-amd64-v0.6.0.tgz
 tar ztvf cni-amd64-v0.6.0.tgz
+curl -OL https://github.com/containernetworking/plugins/releases/download/v0.7.4/cni-plugins-amd64-v0.7.4.tgz
+tar ztvf cni-plugins-amd64-v0.7.4.tgz
 sudo tar xf cni-plugins-amd64-v0.7.4.tgz -C /opt/cni/bin
 ```
 
