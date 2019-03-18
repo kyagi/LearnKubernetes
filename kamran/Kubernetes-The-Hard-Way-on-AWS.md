@@ -34,7 +34,13 @@ Cluster CIDR (like flannel network) = 10.200.0.0/16 (each node will get a subnet
 
 I will use the same /etc/hosts on all nodes, so I do not have to keep track of the IP addresses in various config files.
 
-
+Change hostname as it is.
+```
+sudo hostname worker1
+sudo vi /etc/hostname
+sudo cat /etc/hostname
+worker1
+```
 
 The /etc/hosts file I am using is:
 ```
